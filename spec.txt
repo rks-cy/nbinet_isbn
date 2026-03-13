@@ -1,0 +1,225 @@
+[方式選擇]
+我希望採用：HTTP/HTML解析（A） / Network-first API（B） / 兩者混合
+
+[網站與流程]
+以ISBN碼9786267255384為例進行說明
+入口搜尋 URL：https://nbinet3.ncl.edu.tw/search*cht/?searchtype=i&searcharg=9786267255384&searchscope=1
+提交方式（GET/POST/JSON）：GET
+必需參數（例：field=isbn, query=978...）：searchtype=i 與 searcharg={ISBN數值} 與 searchscope=1,
+標準化路徑為 https://nbinet3.ncl.edu.tw/search*cht/?searchtype=i&searcharg={ISBN}&searchscope=1
+是否需要先 GET 建立 Session/取得 Token：是（需先 GET opacmenu_cht.html 以建立中文語系與範圍 cookies；無需 CSRF token）
+ - 簡易執行流程前，需要先 GET 一次 https://nbinet3.ncl.edu.tw/screens/opacmenu_cht.html 建立範圍相關 cookie，再執行查詢。
+固定 Accept-Language: zh-TW，並以 opacmenu_cht.html 來設定為中文介面，避免語系不一致導致關鍵字匹配失敗。
+
+
+[結果→細項]
+搜尋結果頁中，細項頁的取得方法：
+-  「尋找第一個 .briefcitTitle a」的 href
+- 提供 html 作為範例：<td align="left" valign="top" width="55%">
+<!--{nohitmsg}-->
+<span class="briefcitTitle">
+<a href="/search~S1*cht?/i9786267255384/i9786267255384/1%2C1%2C8%2CE/frameset&amp;FF=i9786267255384&amp;1%2C%2C8">儀式: 看似無意義的行為如何創造有意義的人生= Ritual: how seemingly senseless acts</a></span>
+<br>
+<br>
+新北市 : 鷹出版,  2024.05<br>
+面 ; 公分<br>
+<br>
+Circulation availability : 
+<span class="briefcitStatus">
+1 copy available at (CIP新書書訊)</span>
+<br>
+</td>
+
+[細項頁的「特定按鈕」]
+此按鈕在 Network 對應的請求：
+- 尋找 html 中，文字為 「MARC 顯示」的link，點擊該 link 即可到下一頁。
+- 若該網頁無MARC 「MARC 顯示」，記錄 warning，該 ISBN 跳過
+- link 的 html 範例為:<a href="/search~S1*cht?/i9786267255384/i9786267255384/1%2C1%2C8%2CE/marc&amp;FF=i9786267255384&amp;1%2C%2C8"><img src="/screens/marc_display.gif" alt="MARC 顯示" border="0"></a>
+- curl 範例:
+curl 'https://nbinet3.ncl.edu.tw/search~S1*cht?/i9786267255384/i9786267255384/1%2C1%2C8%2CE/frameset&FF=i9786267255384&1%2C%2C8' \
+  -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7' \
+  -H 'Accept-Language: en-US,en;q=0.9' \
+  -H 'Cache-Control: no-cache' \
+  -H 'Connection: keep-alive' \
+  -b 'III_EXPT_FILE=aa36980; III_SESSION_ID=74c8eba38a28824727eb81af93246e5d; __utma=77785163.387141966.1772842736.1772842736.1772842736.1; __utmc=77785163; __utmz=77785163.1772842736.1.1.utmcsr=(direct)|utmccn=(direct)|utmcmd=(none); SESSION_SCOPE=1; __utmt=1; __utmt_~1=1; __utmb=77785163.19.10.1772842736; SESSION_LANGUAGE=eng' \
+  -H 'Pragma: no-cache' \
+  -H 'Referer: https://nbinet3.ncl.edu.tw/search*cht/?searchtype=i&searcharg=9786267255384' \
+  -H 'Sec-Fetch-Dest: document' \
+  -H 'Sec-Fetch-Mode: navigate' \
+  -H 'Sec-Fetch-Site: same-origin' \
+  -H 'Sec-Fetch-User: ?1' \
+  -H 'Upgrade-Insecure-Requests: 1' \
+  -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36' \
+  -H 'sec-ch-ua: "Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"' \
+  -H 'sec-ch-ua-mobile: ?0' \
+  -H 'sec-ch-ua-platform: "Windows"'
+
+
+[擷取欄位（多筆）]
+- 將整個 pre tag 的內容另存 log 檔，以 utf8 編碼
+- pre tag 範例 html : 
+<pre>LEADER 00000cam  22002652i 4500 
+001    CIP113004567 
+008    240327s2024    ch     e      000 0 chi d 
+020    978-626-7255-38-4|q(平裝) :|cNT$460 
+040    CIP|bchi 
+042    nbic 
+084    530|2ncsclt 
+090    530 
+245 10 儀式: 看似無意義的行為如何創造有意義的人生= Ritual: how 
+       seemingly senseless acts make life worth living /
+       |c迪米特里斯.西加拉塔斯(Dimitris Xygalatas)作; 謝雯伃譯 
+250    初版 
+260    新北市 :|b鷹出版, |c2024.05 
+300    面 ;|c公分 
+650  7 |2lcstt|a禮俗 
+650  7 |2lcstt|a文化人類學 
+650  7 |2lcstt|a民俗心理學 
+650  7 |2lc|aRitual 
+650  7 |2lc|aRites and ceremonies 
+650  7 |2lc|aEvolutionary psychology 
+650  7 |2lc|aPsychology, Religious 
+650  7 |2lc|aSpirituality 
+949    CIP|ccip|d530|tCCL|w04|x04|z090 
+</pre>
+
+[例外處理與等待]
+無結果的判斷依據（文字/selector/回傳碼）：
+ - 出現「沒有查獲符合查詢條件的館藏」
+  -若結果列表容器不存在，或 .briefcitTitle a 找不到 → 視為無結果。
+  - 若頁面存在「nohit/nohitmsg」相關標記（部分系統會有），則亦視為無結果。
+分頁規則（若有）：
+  - 僅需於查詢結果判斷，即 https://nbinet3.ncl.edu.tw/search*cht/?searchtype=i&searcharg={ISBN}&searchscope=1 的結果頁
+  - 只取第一頁，無須管分頁。但若搜尋結果出現「Prev」及「Next」，且各自接有 link 且link不同，則提示、紀錄出現分頁。
+速率上限與間隔（例：每本間隔 500~900ms）：每本間隔 500~900ms
+重試策略（次數/退避）：3次，1.5倍指數退避等待，首次等待3秒。重試時，須於畫面提示重試中。
+重試的「觸發條件」：當重試仍失敗時記錄 error 並跳過該 ISBN
+  - HTTP 逾時/失敗（非 2xx）
+   - 429 / 5xx、結果頁未找到第一筆連結
+   - 細項頁未找到「MARC 顯示」連結
+   - MARC 頁未找到 <pre>
+
+是否遇到驗證（Cloudflare/CAPTCHA）：否。僅須在處理資料沒有達到預期時，於畫面提示。
+前述畫面提示，須同步紀錄至日誌檔。
+
+[輸入/輸出]
+輸入 TXT 路徑：.\isbn.txt, 每行一個 ISBN；遇到不合法（非 10/13 碼）則記錄 warn 並跳過。
+ISBN 格式：允許含 - 或空白；允許多種格式並自動正規化。
+輸出檔名：
+ - {ISBN}.txt（MARC 純文字，取 <pre>）
+  - {ISBN}.html（頁面原始 HTML；若為 frameset，我會存實際載入 MARC 的頁面 HTML）
+日誌檔名：例如 scrape.log（覆蓋式）
+檔案編碼：預設 UTF-8
+是否需要錯誤截圖/HTML：改存 response 原文
+
+[環境]
+OS 與 PowerShell 版本（5.1 / 7.x）：windows 10 預載 powershell
+是否可安裝 HtmlAgilityPack（可/不可）：不可
+是否需要 Proxy（位址/認證）：不可
+User-Agent/Headers 特別要求：無特別要求，但請保留變數供日後修改
+
+[驗收]
+測試 ISBN（≥3）與預期輸出：
+- 測試 ISBN1: 9786267255384
+- ISBN1 期望內容：
+LEADER 00000cam  22002652i 4500 
+001    CIP113004567 
+008    240327s2024    ch     e      000 0 chi d 
+020    978-626-7255-38-4|q(平裝) :|cNT$460 
+040    CIP|bchi 
+042    nbic 
+084    530|2ncsclt 
+090    530 
+245 10 儀式: 看似無意義的行為如何創造有意義的人生= Ritual: how 
+       seemingly senseless acts make life worth living /
+       |c迪米特里斯.西加拉塔斯(Dimitris Xygalatas)作; 謝雯伃譯 
+250    初版 
+260    新北市 :|b鷹出版, |c2024.05 
+300    面 ;|c公分 
+650  7 |2lcstt|a禮俗 
+650  7 |2lcstt|a文化人類學 
+650  7 |2lcstt|a民俗心理學 
+650  7 |2lc|aRitual 
+650  7 |2lc|aRites and ceremonies 
+650  7 |2lc|aEvolutionary psychology 
+650  7 |2lc|aPsychology, Religious 
+650  7 |2lc|aSpirituality 
+949    CIP|ccip|d530|tCCL|w04|x04|z090 
+
+- 測試 ISBN1: 9789861365145
+- ISBN1 期望內容：
+LEADER 00000cam a2200349 a 4500 
+001    C020042019038,C020092019001,C060032020025 
+008    190328s2018    ch a   g      000 0 chi d 
+020    9789861365145|q(第1冊 ;|q平裝) :|cNT$350 
+020    9789861365381|q(第2冊 ;|q平裝) :|cNT$350 
+035    (Sirsi) C020042019038 
+040    NTUNHS|bchi|cNTUNHS 
+041 0  chi 
+042    nbic 
+084    176.5|b8466|2ncsclt 
+090    176.5 8466 107 
+100 1  蔡康永 
+245 10 蔡康永的情商課 /|c蔡康永著; 好笑刺青店插畫 
+246 33 為你自己活一次 
+246 33 因為這是你的人生 
+250    初版 
+260    臺北市 :|b如何出版 :|b叩應總經銷,|c2018-2019[民107-108] 
+300    2冊b圖 ;|c21公分 
+490 1  Happy learning ;|v169.179 
+500    館藏:第1.2冊 
+505    1,為你自己活一次--2,因為這是你的人生 
+650  7 情緒商數|2lcstt 
+650  7 情緒管理|2lcstt 
+700 0  好笑刺青店 
+740 02 為你自己活一次 
+740 02 因為這是你的人生 
+830  0 Happy learning ;|v169.179 
+949    NTUNH|c0113225ntunh|d176.5 8466 107|pC|lv.1|tCCL|z090 
+
+- 測試 ISBN1: 9786267589687
+- ISBN1 期望內容：
+LEADER 00000cam a2200421 i 4500 
+001    785699 
+005    20260126141859.0 
+008    260126s2025    ch  ad g      000 0 chi d 
+020    9786267589687|q(平裝) :|cNT$630 
+040    NCUE 
+041 1  chi|heng 
+042    nbic 
+084    573.1|b4412 
+090    573.1|b4412 
+099    115LIB 
+100 1  黃亞生|c(Huang, Yasheng) 
+240 10 Rise and fall of the east : how exams, autocracy, 
+       stability, and technology brought China success, and why 
+       they might lead to its decline 
+245 10 中國模式的終點 :|b從科舉帝制到數位威權,
+       揭露中國式治理制度的宿命 /|c黃亞生(Yasheng Huang)著 ; 
+       簡瑋君譯 
+246 10 從科舉帝制到數位威權,揭露中國式治理制度的宿命 
+250    初版 
+260    臺北市 :|b今周刊,|c2025[民114] 
+300    443面 :|b圖, 圖表 ;|c21公分 
+490 1  焦點系列 ;|v035 
+490 1  焦點系列 ;|v35 
+490 1  Focus 
+500    譯自 : The rise and fall of the east : how exams, autocracy
+       , stability, and technology brought China success, and why
+       they might lead to its decline 
+650  7 中國政治制度|2lcstt 
+650  7 經濟政策|2lcstt 
+650  7 歷史|2lcstt 
+651  7 中國|2lcstt 
+700 1  簡瑋君 
+700 1  Huang, Yasheng 
+765 0  |tThe rise and fall of the east : how exams, autocracy, 
+       stability, and technology brought China success, and why 
+       they might lead to its decline 
+830  0 焦點系列 ;|v035 
+830  0 焦點系列 ;|v35 
+830  0 Focus 
+949    CUE|d573.1|e4412|c0460724cue|tCCL|w08|x08|z090 
+
+成功率/效能目標：每筆 ISBN 至少包含欄位 020（ISBN 行）、245（題名）、260/264（出版）等關鍵欄位
+日誌需求（info/warn/error，是否分檔）：不用分檔，固定名稱即可，每次蓋檔。
