@@ -1,0 +1,376 @@
+==============================================================
+  第二階段規格：MARC 文字記錄 → CSV 匯出
+==============================================================
+
+[目標]
+讀取第一階段下載的 {ISBN}.txt 純文字 MARC 記錄，逐一解析欄位，
+依照「欄位映射定義檔 (fields.conf)」匯整成一份 CSV 檔案，
+欄位格式參考 isbn_list.csv。
+
+
+[輸入/輸出]
+輸入 1：isbn.txt（每行一個 ISBN；同第一階段，做為處理順序依據）
+輸入 2：{ISBN}.txt（第一階段輸出；UTF-8；與 isbn.txt 同目錄）
+輸入 3：fields.conf（欄位映射定義檔；UTF-8 純文字；與 isbn.txt 同目錄）
+輸出  ：marc_output.csv（覆蓋式；UTF-8 with BOM，供 Excel 直接開啟）
+日誌  ：parse.log（覆蓋式；UTF-8）
+
+輸出欄位順序：與 fields.conf 中的欄位定義順序相同。
+輸出 CSV 第一行為標題列（欄位名稱）。
+值內含逗號/雙引號時，依 RFC 4180 用雙引號包覆並跳脫。
+
+
+[MARC 文字格式解析規則]
+
+此階段的 .txt 之 MARC 記錄為「純文字」格式（非 ISO2709 二進位），
+從 NBINet 的 <pre> 區塊取得，格式規定如下：
+
+1. 行結構
+   - LEADER 行：以 "LEADER " 開頭，後接 24 字元的 Leader 值。
+   - 控制欄位（001–009）：以 3 位 tag 開頭，無 indicator，無子欄位，
+     整行其餘部分為欄位值。
+   - 資料欄位（010–999）：格式為
+       TAG IND1 IND2 CONTENT
+     其中：
+       TAG    = 3 位數字
+       IND1   = 1 字元（空白或數字）
+       IND2   = 1 字元（空白或數字）
+       空白   = TAG 與 IND 之間的分隔（合計 2–4 個字元縮排）
+       CONTENT= 子欄位串接，以 |x 分隔（x = 英文字母）
+   - 延續行：若某行以「空白縮排」開頭（無 TAG），視為前一欄位的
+     接續內容，應與前一行內容直接串接（不加換行或空格）。
+     串接前先 trim 延續行左側空白，但保留右側（含子欄代碼 |x）。
+
+2. 子欄位解析
+   - 欄位內容中 |x 代表子欄分隔（x = 英文字母）。
+   - 欄位值第一段（第一個 | 之前）隱含為 $a 子欄位。
+   - 範例：
+       "臺北市 :|b遠見天下文化,|c2019[民108]"
+       → $a = "臺北市 :"  $b = "遠見天下文化,"  $c = "2019[民108]"
+
+3. HTML 實體解碼（在所有後處理之前解碼）
+   最低需支援：
+     &#59;  → ;
+     &#38;  → &
+     &amp;  → &
+     &lt;   → <
+     &gt;   → >
+     &quot; → "
+     &#xx;  → 其對應的 Unicode 字元（十進位）
+
+4. 控制欄位 008 的定位解析（MARC21 專用）
+   008 為固定長 40 字元的控制欄位，以 0-based 索引讀取：
+   - 008[07:4]  → 出版西元年（4 碼）
+   - 008[35:3]  → 語言碼（3 碼，如 chi、eng）
+   在 fields.conf 中以 008[偏移:長度] 語法表示此類定位欄位。
+
+
+[MARC 格式辨識：MARC21 vs. UNIMARC]
+
+NBINet 收錄兩種格式，須在解析每個 .txt 時自動辨識：
+
+偵測規則（依序）：
+  1. 若含有 "200 " tag 且其內容包含 "|f" 或 "|g" → 視為 UNIMARC
+  2. 若含有 "245" tag → 視為 MARC21
+  3. 若兩者皆無 → 記錄 WARN，視為 MARC21 繼續（欄位取不到時留空）
+
+辨識結果須寫入 parse.log，格式：
+  [INFO] {ISBN}: 格式辨識 = MARC21
+  [INFO] {ISBN}: 格式辨識 = UNIMARC
+  [WARN] {ISBN}: 無法辨識格式，以 MARC21 處理
+
+MARC21 主要使用的 tag：020 040 084 090 100 245 246 250 260 264
+                        300 490 500 520 546 650 651 700 710 730 740 830 949
+UNIMARC 主要使用的 tag：010 100 101 102 200 205 210 211 215 225
+                        681 700 801 805
+
+
+[定義檔格式 (fields.conf)]
+
+----- 語法說明 ----
+
+# 開頭為注釋行，空行忽略。
+
+欄位名稱: 來源1 來源2 ...
+    [選項行，以 4 空格縮排]
+
+各元素定義：
+
+A. 欄位名稱
+   CSV 的標題名稱，可含中文。冒號後為來源清單。
+   欄位名稱冒號後若無任何來源，代表該欄位永遠輸出空字串（保留欄位用）。
+
+B. 來源（Source）語法
+   - TAGx        → 取 TAG 欄位+子欄 x（單一子欄）
+                   例：020a = 欄位020 的 $a
+   - TAGxy...    → 取 TAG 欄位的多個子欄，依序串接
+                   例：300abc = 欄位300 的 $a+$b+$c 串接
+                   子欄串接符由 SUBFIELD_JOIN 選項決定（預設空字串）
+   - 008[N:L]    → 取 008 控制欄位，從 0-based 位置 N 起取 L 字元
+   - 多個來源空白分隔，代表優先序：前者有值則用前者，否則取次者
+     例："020a 010a" 先試 020$a，無值再試 010$a
+
+C. 選項（4 空格縮排，可省略，則使用預設值）
+   TAKE=first|all
+     first（預設）：同 TAG 存在多筆時，僅取第一筆
+     all           ：取全部，以 JOIN 串接
+   JOIN=分隔符
+     TAKE=all 時，多個同 TAG 值之間的串接符（預設「；」）
+   SUBFIELD_JOIN=符號
+     同一筆多子欄串接時的分隔符（預設空字串 ""）
+     注意：「符號」在純文字檔中可能不可見，以下為兩種常用寫法：
+       SUBFIELD_JOIN= （等號後恰好 1 個空格，行尾）→ 子欄以空格分隔
+       SUBFIELD_JOIN=  （等號後無字元，直接換行）   → 子欄直接串接
+   TRANSFORM=規則1,規則2,...
+     依序套用的轉換規則（見下方轉換規則說明）
+
+----- 欄位映射表（預設 fields.conf 內容建議）-----
+（開發者應將此作為 fields.conf 的初始內容）
+
+# ==============================================================
+# NBINet MARC → CSV 欄位映射定義檔
+# 格式: 欄位名稱: 來源（MARC tag + 子欄碼，優先序由左至右）
+# 兩種格式（MARC21 / UNIMARC）的對應欄位並排列於同一優先序中
+# ==============================================================
+
+登錄號:
+    # 館藏系統流水號，不從 MARC 取得，永遠輸出空字串
+
+ISBN: 020a 010a
+    TRANSFORM=ISBN_CLEAN
+
+書名: 245a 200ahe
+    SUBFIELD_JOIN= 
+    # UNIMARC 200: $a=主書名 $h=冊次號 $e=副書名，以空格串接
+    TRANSFORM=HTML_DECODE,STRIP_PUNCT
+
+並列題名: 246a 200d
+    TRANSFORM=HTML_DECODE,STRIP_PUNCT
+
+分類號: 090a 084a 681a
+    TRANSFORM=STRIP_PUNCT
+
+作者: 245c 200fg 100a
+    SUBFIELD_JOIN= 
+    TRANSFORM=HTML_DECODE,STRIP_PUNCT
+
+版本: 250a 205a
+    TRANSFORM=STRIP_PUNCT
+
+出版地: 260a 210a
+    TRANSFORM=HTML_DECODE,STRIP_PUNCT
+
+出版社: 260b 210c
+    TRANSFORM=HTML_DECODE,STRIP_PUNCT
+
+書目出處: 040a 801b
+    TRANSFORM=STRIP_PUNCT
+
+出版西元年: 260c 008[07:4] 210d
+    TRANSFORM=HTML_DECODE,YEAR_CE
+
+語言別: 041a 101a 008[35:3]
+
+叢書名: 490av 225av
+    TAKE=all
+    SUBFIELD_JOIN=
+    JOIN=；
+    TRANSFORM=HTML_DECODE,STRIP_PUNCT
+
+價格: 020c 010d
+    TRANSFORM=HTML_DECODE,STRIP_PUNCT
+
+標題項:
+    # CSV 保留欄（欄序第 15 欄），MARC 無對應，永遠輸出空字串
+
+出版民國年: 260c 210d
+    TRANSFORM=HTML_DECODE,YEAR_ROC
+
+裝訂別(請填入平裝;精裝;套裝;其他): 020q 010b
+    TRANSFORM=HTML_DECODE,BINDING,STRIP_PUNCT
+
+集叢項: 490av 225av
+    TAKE=all
+    SUBFIELD_JOIN=
+    JOIN=；
+    TRANSFORM=HTML_DECODE,STRIP_PUNCT
+
+附註項: 500a 504a 546a
+    TAKE=all
+    JOIN=；
+    TRANSFORM=HTML_DECODE,STRIP_PUNCT
+
+主題項: 650a 651a
+    TAKE=all
+    JOIN=；
+    TRANSFORM=HTML_DECODE,STRIP_PUNCT
+
+追尋項: 700a 710a 730a 740a
+    TAKE=all
+    JOIN=；
+    TRANSFORM=HTML_DECODE,STRIP_PUNCT
+
+排架號: 090ab 084ab 949d
+    SUBFIELD_JOIN= 
+    TRANSFORM=STRIP_PUNCT
+
+館藏狀態:
+流通別:
+資料別:
+特藏號:
+冊次號:
+複本號:
+館藏地(請填入館藏地名稱):
+來源別(請填入購買;贈送;交換):
+捐贈者:
+附件:
+新增日期:
+
+
+[轉換規則說明]
+
+各 TRANSFORM 規則的處理邏輯：
+
+HTML_DECODE
+  將 &#N; / &amp; / &lt; / &gt; / &quot; 轉為對應字元。
+  此規則永遠最先套用（即使未在清單最前）。
+
+ISBN_CLEAN
+  1. HTML_DECODE（同上）
+  2. 移除所有空白與連字號（-）
+  3. 只保留數字與末位 X
+  4. 驗證是否為 10 或 13 碼，若否記錄 WARN 並保留原始（清理後）值
+
+STRIP_PUNCT
+  去除字串首尾的以下字元（含前後空白）：
+    / : , ; 。，、˸ 空白
+  套用順序：先對每個子欄的個別值各套用一次，再以 SUBFIELD_JOIN 合併；
+  若 TAKE=all，再對整體合併後的字串套用最後一次。
+  範例：490$a="文學館 ;" + $v="358"，SUBFIELD_JOIN="" →
+    STRIP_PUNCT("文學館 ;") + "" + STRIP_PUNCT("358") = "文學館" + "358" = "文學館358"
+
+YEAR_CE
+  從字串中以正規表示式擷取第一個 4 位數字（\d{4}），作為西元年。
+  若找不到 4 位數字則輸出空字串，並記錄 WARN。
+  範例："2019[民108]" → "2019"；"2018.09" → "2018"
+
+YEAR_ROC
+  先執行 YEAR_CE 取得西元年，再計算民國年 = CE - 1911。
+  若 CE < 1912 或無法取得則輸出空字串。
+  範例："2019[民108]" → "108"
+
+BINDING
+  從字串中尋找關鍵字（平裝/精裝/套裝），輸出第一個匹配項。
+  若均無匹配則輸出「其他」；若輸入為空則輸出空字串。
+  範例："(平裝) :" → "平裝"；"精裝本" → "精裝"
+
+
+[多值欄位處理]
+
+同一 TAG 出現多筆（如多個 490、多個 650）時：
+- TAKE=first（預設）：只取第一筆記錄。
+- TAKE=all          ：取全部，以 JOIN 指定的分隔符串接後輸出。
+
+特別地，若某 TAG 的多個子欄組合（如 490$a+$v）需合併，
+  規則如下：
+  1. 先取該筆記錄內的所有指定子欄，以 SUBFIELD_JOIN 串接 → 得到「單筆值」
+  2. 多筆記錄的多個「單筆值」再以 JOIN 串接 → 得到最終值
+
+
+[例外與錯誤處理]
+
+1. .txt 檔案不存在
+   → 記錄 ERROR，該 ISBN 的所有欄位輸出空字串，仍寫入 CSV 一列。
+
+2. .txt 存在但為空檔
+   → 記錄 WARN，同上處理。
+
+3. 定義欄位在 MARC 中找不到（所有來源均無值）
+   → 輸出空字串，不記錄 warn（正常情況）。
+
+4. 規則型例外（TRANSFORM 失敗，如 YEAR_CE 找不到年份）
+   → 記錄 WARN，輸出空字串。
+
+5. isbn.txt 中的 ISBN 格式不合法（非 10/13 碼）
+   → 記錄 WARN 並跳過（不寫入 CSV）。
+
+6. fields.conf 解析失敗（語法錯誤）
+   → 輸出 ERROR 並中止執行。
+
+日誌格式（每行）：
+  [INFO]  {ISBN}: {訊息}
+  [WARN]  {ISBN}: {訊息}
+  [ERROR] {ISBN}: {訊息}
+
+
+[環境]
+
+OS         ：Windows 10，PowerShell 5.1（同第一階段）
+外部套件   ：不可安裝（HtmlAgilityPack 等均不使用）
+實作語言   ：PowerShell（與第一階段 run.ps1 / lib/ 同風格）
+建議主腳本 ：parse.ps1（新增；與 run.ps1 同層）
+建議介面   ：
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File parse.ps1 `
+    -IsbnFile ".\isbn.txt" `
+    -InputDir "." `
+    -FieldsConf ".\fields.conf" `
+    -OutputCsv ".\marc_output.csv"
+  所有參數均有預設值（指向同目錄下的對應檔案名稱）。
+一鍵執行   ：在 launch.cmd 中於第一階段任務完成後，接著呼叫 parse.ps1。
+
+
+[驗收]
+
+以下三個 ISBN 可作為驗收測試（.txt 檔案已存在）：
+
+測試 1：9789864798087（MARC21）
+  期望格式辨識：MARC21
+  期望關鍵欄位（HTML 解碼後，STRIP_PUNCT 後）：
+    ISBN         = 9789864798087
+    書名         = 大野狼咕嚕咕嚕
+    作者         = 賴曉珍文 ; 蔡豫寧(yunintsai)圖
+    版本         = 第一版
+    出版地       = 臺北市
+    出版社       = 遠見天下文化
+    出版西元年   = 2019
+    語言別       = chi
+    叢書名（all）= 文學館358；好品格童話8；故事奇想樹BKL358
+    價格         = NT$260
+    裝訂別       = 平裝
+
+測試 2：9789864795277（UNIMARC）
+  期望格式辨識：UNIMARC
+  期望關鍵欄位：
+    ISBN         = 9789864795277
+    書名         = 好品格童話 6 蝴蝶女王與糞金龜
+                   （200$a + $h + $e，SUBFIELD_JOIN=空格；$a=主書名、$h=冊次號、$e=副書名）
+    作者         = 賴曉珍文 蔡元婷圖
+                   （200$f + $g，SUBFIELD_JOIN=空格）
+    版本         = 第一版
+    出版地       = 臺北市
+    出版社       = 遠見天下文化
+    出版西元年   = 2018
+    語言別       = chi
+
+測試 3：9786267255384（MARC21，延續行、HTML實體）
+  期望格式辨識：MARC21
+  期望關鍵欄位：
+    ISBN         = 9786267255384
+    書名         = 儀式: 看似無意義的行為如何創造有意義的人生
+    作者         = 迪米特里斯.西加拉塔斯(Dimitris Xygalatas)作; 謝雯伃譯
+    版本         = 初版
+    出版地       = 新北市
+    出版社       = 鷹出版
+    出版西元年   = 2024
+    出版民國年   = 113
+    裝訂別       = 平裝
+    主題項（all）= 禮俗；文化人類學；民俗心理學；Ritual；Rites and ceremonies；
+                   Evolutionary psychology；Psychology, Religious；Spirituality
+
+延續行合併驗收（245 欄位）：
+  9786267255384.txt 的 245 tag 跨三行，合併後應得到完整的 245$a 與 245$c。
+
+  期望 245$a（STRIP_PUNCT 後）：
+    儀式: 看似無意義的行為如何創造有意義的人生= Ritual: how seemingly senseless acts make life worth living /
+  期望 245$c：
+    迪米特里斯.西加拉塔斯(Dimitris Xygalatas)作; 謝雯伃譯

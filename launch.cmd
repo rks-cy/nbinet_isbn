@@ -1,4 +1,5 @@
 ﻿@echo off
+chcp 65001 > nul
 setlocal
 echo [INFO] 初始化啟動器...
 cd /d "%~dp0"
@@ -17,18 +18,42 @@ set ERR=%errorlevel%
 
 echo.
 echo ================== [Transcript Tail] ==================
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "'--- transcript.log (tail 80) ---'; if (Test-Path '%~dp0transcript.log') { Get-Content -Path '%~dp0transcript.log' -Tail 80 | Out-String | Write-Host } else { Write-Host 'transcript.log 不存在。' }"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "'--- transcript.log (tail 80) ---'; if (Test-Path '%~dp0transcript.log') { Get-Content -Path '%~dp0transcript.log' -Tail 80 | Out-String | Write-Host } else { Write-Host 'transcript.log not found.' }"
 
 echo.
 echo ================== [Scrape Log Tail] ==================
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "'--- scrape.log (tail 80) ---'; if (Test-Path '%~dp0scrape.log') { Get-Content -Path '%~dp0scrape.log' -Tail 80 | Out-String | Write-Host } else { Write-Host 'scrape.log 不存在。' }"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "'--- scrape.log (tail 80) ---'; if (Test-Path '%~dp0scrape.log') { Get-Content -Path '%~dp0scrape.log' -Tail 80 | Out-String | Write-Host } else { Write-Host 'scrape.log not found.' }"
 
 echo.
 if %ERR% NEQ 0 (
-  echo [ERROR] 任務執行發生錯誤（errorlevel=%ERR%）。
+  echo [ERROR] Phase 1 執行發生錯誤（errorlevel=%ERR%），跳過 Phase 2。
+  pause
+  endlocal
+  exit /b %ERR%
+)
+
+echo [INFO] Phase 1 完成，開始執行 Phase 2（MARC → CSV）...
+echo.
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0parse.ps1" ^
+  -IsbnFile "%~dp0isbn.txt" ^
+  -InputDir "%~dp0." ^
+  -FieldsConf "%~dp0fields.conf" ^
+  -OutputCsv "%~dp0marc_output.csv"
+
+set ERR2=%errorlevel%
+
+echo.
+echo ================== [Parse Log Tail] ==================
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "'--- parse.log (tail 40) ---'; if (Test-Path '%~dp0parse.log') { Get-Content -Path '%~dp0parse.log' -Tail 40 | Out-String | Write-Host } else { Write-Host 'parse.log not found.' }"
+
+echo.
+if %ERR2% NEQ 0 (
+  echo [ERROR] Phase 2 執行發生錯誤（errorlevel=%ERR2%）。
   pause
 ) else (
-  echo [INFO] 任務完成。按任意鍵關閉...
+  echo [INFO] 全部完成。輸出檔案：%~dp0marc_output.csv
+  echo [INFO] 按任意鍵關閉...
   pause
 )
 endlocal
