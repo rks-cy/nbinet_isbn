@@ -8,7 +8,7 @@
 #>
 param(
     [string]$IsbnFile   = ".\isbn.txt",
-    [string]$InputDir   = ".",
+    [string]$InputDir   = ".\grabbed_isbn",
     [string]$FieldsConf = ".\fields.conf",
     [string]$OutputCsv  = ".\marc_output.csv"
 )
@@ -100,9 +100,11 @@ $headerCells = $fieldDefs | ForEach-Object { Format-CsvCell -Value $_.Name }
 # ---------------------------------------------------------------------------
 # Process each ISBN
 # ---------------------------------------------------------------------------
-foreach ($rawIsbn in $isbnLines) {
-    $isbn = $rawIsbn.Trim() -replace '[-\s]', ''
-    if ([string]::IsNullOrEmpty($isbn)) { continue }
+foreach ($rawLine in $isbnLines) {
+    if ([string]::IsNullOrEmpty($rawLine.Trim())) { continue }
+    $parts = $rawLine.Trim().Split(',', 2)
+    $registerNumber = $parts[0].Trim()
+    $isbn = $parts[1].Trim() -replace '[-\s]', ''
 
     # Validate ISBN (10 or 13 digits, last char may be X for ISBN-10)
     if ($isbn -notmatch '^[0-9]{9}[0-9Xx]$' -and $isbn -notmatch '^\d{13}$') {
@@ -149,6 +151,10 @@ foreach ($rawIsbn in $isbnLines) {
     # Build row
     $rowCells = [System.Collections.ArrayList]::new()
     foreach ($def in $fieldDefs) {
+        if ($def.Name -eq '登錄號') {
+            [void]$rowCells.Add((Format-CsvCell -Value $registerNumber))
+            continue
+        }
         if ($allEmpty -or $def.Sources.Count -eq 0) {
             [void]$rowCells.Add('')
             continue
