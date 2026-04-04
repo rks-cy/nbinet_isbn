@@ -9,9 +9,9 @@
 
 
 [輸入/輸出]
-輸入 1：isbn.txt（每行一個 ISBN；同第一階段，做為處理順序依據）
-輸入 2：{ISBN}.txt（第一階段輸出；UTF-8；與 isbn.txt 同目錄）
-輸入 3：fields.conf（欄位映射定義檔；UTF-8 純文字；與 isbn.txt 同目錄）
+輸入 1：isbn.csv（每行一個 ISBN；同第一階段，做為處理順序依據）
+輸入 2：{ISBN}.txt（第一階段輸出；UTF-8；與 isbn.csv 同目錄）
+輸入 3：fields.conf（欄位映射定義檔；UTF-8 純文字；與 isbn.csv 同目錄）
 輸出  ：marc_output.csv（覆蓋式；UTF-8 with BOM，供 Excel 直接開啟）
 日誌  ：parse.log（覆蓋式；UTF-8）
 
@@ -291,7 +291,7 @@ BINDING
 4. 規則型例外（TRANSFORM 失敗，如 YEAR_CE 找不到年份）
    → 記錄 WARN，輸出空字串。
 
-5. isbn.txt 中的 ISBN 格式不合法（非 10/13 碼）
+5. isbn.csv 中的 ISBN 格式不合法（非 10/13 碼）
    → 記錄 WARN 並跳過（不寫入 CSV）。
 
 6. fields.conf 解析失敗（語法錯誤）
@@ -311,7 +311,7 @@ OS         ：Windows 10，PowerShell 5.1（同第一階段）
 建議主腳本 ：parse.ps1（新增；與 run.ps1 同層）
 建議介面   ：
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File parse.ps1 `
-    -IsbnFile ".\isbn.txt" `
+    -IsbnFile ".\isbn.csv" `
     -InputDir "." `
     -FieldsConf ".\fields.conf" `
     -OutputCsv ".\marc_output.csv"

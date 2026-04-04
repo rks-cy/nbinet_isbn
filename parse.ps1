@@ -7,7 +7,7 @@
     maps fields using fields.conf, and writes marc_output.csv (UTF-8 BOM).
 #>
 param(
-    [string]$IsbnFile   = ".\isbn.txt",
+    [string]$IsbnFile   = ".\isbn.csv",
     [string]$InputDir   = ".\grabbed_isbn",
     [string]$FieldsConf = ".\fields.conf",
     [string]$OutputCsv  = ".\marc_output.csv"

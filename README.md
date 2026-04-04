@@ -9,7 +9,7 @@
 ## 使用環境
 
 - Windows 10 + 內建 PowerShell（不需安裝任何額外套件）
-- 準備好 `isbn.txt`（每行一筆：`登錄號,ISBN`）
+- 準備好 `isbn.csv`（每行一筆：`登錄號,ISBN`）
 - 雙擊 `launch.cmd` 即自動執行全流程
 
 ---
@@ -18,7 +18,7 @@
 
 ### 第一階段：下載書目（scrape.ps1）
 
-1. 讀取 `isbn.txt` 的 ISBN 清單
+1. 讀取 `isbn.csv` 的 ISBN 清單
 2. 逐一到 NBINet 搜尋 → 進入書目細項頁 → 點「MARC 顯示」
 3. 把 MARC 純文字存成 `grabbed_isbn/{ISBN}.txt`，原始 HTML 存成 `grabbed_isbn/{ISBN}.html`
 4. 每本間隔 0.5～0.9 秒；失敗自動重試 3 次；錯誤記入 `scrape.log`
@@ -36,7 +36,7 @@
 
 | 檔案 | 說明 |
 |---|---|
-| `isbn.txt` | 輸入：每行 `登錄號,ISBN` |
+| `isbn.csv` | 輸入：每行 `登錄號,ISBN` |
 | `fields.conf` | 設定：CSV 欄位映射規則 |
 | `grabbed_isbn/` | Phase 1 輸出：`.txt` 與 `.html` |
 | `marc_output.csv` | Phase 2 輸出：書目表格 |
@@ -45,7 +45,7 @@
 
 ---
 
-## isbn.txt 格式
+## isbn.csv 格式
 
 每行兩欄，以逗號分隔：
 
@@ -61,7 +61,7 @@ TEST003,9786267255384
 ## 變更記錄
 
 ### 目前版本
-- `isbn.txt` 改為兩欄格式（登錄號,ISBN）；登錄號直接填入 CSV 第一欄
+- `isbn.csv` 改為兩欄格式（登錄號,ISBN）；登錄號直接填入 CSV 第一欄
 - 第一階段輸出改存至 `grabbed_isbn/` 子目錄（不存在時自動建立）
 - `launch.cmd` 直接呼叫 `scrape.ps1`，移除中間層 `run.ps1`
 

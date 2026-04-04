@@ -103,7 +103,7 @@ curl 'https://nbinet3.ncl.edu.tw/search~S1*cht?/i9786267255384/i9786267255384/1%
 前述畫面提示，須同步紀錄至日誌檔。
 
 [輸入/輸出]
-輸入 TXT 路徑：.\isbn.txt, 每行一個 ISBN；遇到不合法（非 10/13 碼）則記錄 warn 並跳過。
+輸入 CSV 路徑：.\isbn.csv, 每行一個 ISBN；遇到不合法（非 10/13 碼）則記錄 warn 並跳過。
 ISBN 格式：允許含 - 或空白；允許多種格式並自動正規化。
 輸出檔名：
  - {ISBN}.txt（MARC 純文字，取 <pre>）

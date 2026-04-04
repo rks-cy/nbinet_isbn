@@ -1,5 +1,5 @@
 ﻿param(
-  [string]$InputFile      = ".\isbn.txt",
+  [string]$InputFile      = ".\isbn.csv",
   [string]$OutputDir      = ".\grabbed_isbn",
   [string]$UserAgent      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) PowerShellScraper/1.0",
   [string]$AcceptLanguage = "zh-TW",

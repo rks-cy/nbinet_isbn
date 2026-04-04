@@ -7,7 +7,7 @@ cd /d "%~dp0"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "try { if (-not (Test-Path '%~dp0scrape.log')) { Set-Content -Path '%~dp0scrape.log' -Value '' -Encoding utf8 } } catch { }"
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scrape.ps1" ^
-  -InputFile "%~dp0isbn.txt" ^
+  -InputFile "%~dp0isbn.csv" ^
   -OutputDir "%~dp0grabbed_isbn" ^
   -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) PowerShellScraper/1.0" ^
   -AcceptLanguage "zh-TW" ^
@@ -32,7 +32,7 @@ echo [INFO] Phase 1 完成，開始執行 Phase 2（MARC → CSV）...
 echo.
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0parse.ps1" ^
-  -IsbnFile "%~dp0isbn.txt" ^
+  -IsbnFile "%~dp0isbn.csv" ^
   -InputDir "%~dp0grabbed_isbn" ^
   -FieldsConf "%~dp0fields.conf" ^
   -OutputCsv "%~dp0marc_output.csv"
