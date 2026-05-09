@@ -40,7 +40,8 @@ $logLines = [System.Collections.ArrayList]::new()
 
 function Write-ParseLog {
     param([string]$Level, [string]$Isbn, [string]$Message)
-    $entry = "[$Level] $($Isbn): $Message"
+    $ts = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+    $entry = "[$ts] [$Level] $($Isbn): $Message"
     [void]$logLines.Add($entry)
     Write-Host $entry
 }
@@ -60,7 +61,7 @@ if (-not (Test-Path $libPath)) {
 # ---------------------------------------------------------------------------
 $script:UnihanFourCorner = @{}
 if (-not (Test-Path $UnihanFile)) {
-    Write-Host "[WARN]  : 找不到 Unihan 資料檔，作者首字四角號碼欄位將全部輸出查無結果：$UnihanFile"
+    Write-ParseLog -Level 'WARN' -Isbn '' -Message "找不到 Unihan 資料檔，作者首字四角號碼欄位將全部輸出查無結果：$UnihanFile"
 } else {
     $unihanCount = 0
     foreach ($uLine in [System.IO.File]::ReadLines($UnihanFile, [System.Text.Encoding]::UTF8)) {
@@ -77,7 +78,7 @@ if (-not (Test-Path $UnihanFile)) {
             }
         }
     }
-    Write-Host "[INFO]  : Unihan 四角號碼表載入完成，共 $unihanCount 筆"
+    Write-ParseLog -Level 'INFO' -Isbn '' -Message "Unihan 四角號碼表載入完成，共 $unihanCount 筆"
 }
 
 # ---------------------------------------------------------------------------

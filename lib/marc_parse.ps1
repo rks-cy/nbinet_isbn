@@ -226,7 +226,7 @@ function Invoke-MarcTransform {
         [string]$Value,
         [string[]]$Rules,
         [string]$Isbn = '',
-        [ref]$WarnList  # [System.Collections.ArrayList]
+        [System.Collections.ArrayList]$WarnList = $null
     )
 
     foreach ($rule in $Rules) {
@@ -242,7 +242,7 @@ function Invoke-MarcTransform {
                 $len = $Value.Length
                 if ($len -ne 10 -and $len -ne 13) {
                     if ($WarnList -ne $null) {
-                        [void]$WarnList.Value.Add("ISBN_CLEAN: 無效長度 $len for '$Value'")
+                        [void]$WarnList.Add("ISBN_CLEAN: 無效長度 $len for '$Value'")
                     }
                 }
             }
@@ -256,7 +256,7 @@ function Invoke-MarcTransform {
                     $Value = $m.Value
                 } else {
                     if ($WarnList -ne $null) {
-                        [void]$WarnList.Value.Add("YEAR_CE: 找不到年份 in '$Value'")
+                        [void]$WarnList.Add("YEAR_CE: 找不到年份 in '$Value'")
                     }
                     $Value = ''
                 }
@@ -303,7 +303,30 @@ function Invoke-MarcTransform {
                             $Value = $lookup
                         } else {
                             if ($WarnList -ne $null) {
-                                [void]$WarnList.Value.Add("FOUR_CORNER: 找不到「$firstChar」的四角號碼")
+                                [void]$WarnList.Add("FOUR_CORNER: 找不到「$firstChar」的四角號碼")
+                            }
+                            $Value = "(查無四角號碼:$firstChar)"
+                        }
+                    }
+                }
+            }
+            'FOUR_CORNER_INT' {
+                if (-not [string]::IsNullOrEmpty($Value)) {
+                    $firstChar = $Value[0]
+                    # Non-CJK characters: output empty string, no warning.
+                    if ([int]$firstChar -lt 0x2E80) {
+                        $Value = ''
+                    } else {
+                        $lookup = $null
+                        if ($Script:UnihanFourCorner -ne $null) {
+                            $lookup = $Script:UnihanFourCorner[$firstChar.ToString()]
+                        }
+                        if ($lookup) {
+                            # Keep integer part only (e.g. "3530.6" -> "3530")
+                            $Value = ($lookup -replace '\.\d+$', '')
+                        } else {
+                            if ($WarnList -ne $null) {
+                                [void]$WarnList.Add("FOUR_CORNER_INT: 找不到「$firstChar」的四角號碼")
                             }
                             $Value = "(查無四角號碼:$firstChar)"
                         }
@@ -353,7 +376,7 @@ function Get-FieldValue {
             if (-not [string]::IsNullOrEmpty($result)) {
                 # Apply non-STRIP transforms
                 $otherRules = $FieldDef.Transforms | Where-Object { $_ -ne 'STRIP_PUNCT' }
-                $result = Invoke-MarcTransform -Value $result -Rules $otherRules -WarnList $WarnList
+                $result = Invoke-MarcTransform -Value $result -Rules $otherRules -WarnList $WarnList.Value
                 if (-not [string]::IsNullOrEmpty($result)) { return $result }
             }
             continue
@@ -377,7 +400,7 @@ function Get-FieldValue {
                 if ($doStripPunct) { $result = Invoke-StripPunct -Value $result }
                 # Apply other transforms
                 $otherRules = $FieldDef.Transforms | Where-Object { $_ -ne 'STRIP_PUNCT' }
-                $result = Invoke-MarcTransform -Value $result -Rules $otherRules -WarnList $WarnList
+                $result = Invoke-MarcTransform -Value $result -Rules $otherRules -WarnList $WarnList.Value
                 if (-not [string]::IsNullOrEmpty($result)) { return $result }
             }
         } else {
@@ -386,7 +409,7 @@ function Get-FieldValue {
             $rowVal = Get-SubfieldValue -Rec $rec -Subfields $src.Subfields -SubfieldJoin $sjoin -DoStripPunct $doStripPunct
             if (-not [string]::IsNullOrEmpty($rowVal)) {
                 $otherRules = $FieldDef.Transforms | Where-Object { $_ -ne 'STRIP_PUNCT' }
-                $result = Invoke-MarcTransform -Value $rowVal -Rules $otherRules -WarnList $WarnList
+                $result = Invoke-MarcTransform -Value $rowVal -Rules $otherRules -WarnList $WarnList.Value
                 if (-not [string]::IsNullOrEmpty($result)) { return $result }
             }
         }
