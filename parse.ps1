@@ -10,7 +10,8 @@ param(
     [string]$IsbnFile   = ".\isbn.csv",
     [string]$InputDir   = ".\grabbed_isbn",
     [string]$FieldsConf = ".\fields.conf",
-    [string]$OutputCsv  = ".\marc_output.csv"
+    [string]$OutputCsv  = ".\marc_output.csv",
+    [string]$UnihanFile = ".\data\Unihan_DictionaryLikeData.txt"
 )
 
 $ErrorActionPreference = 'Continue'
@@ -29,6 +30,7 @@ $IsbnFile   = Resolve-ScriptPath $IsbnFile
 $InputDir   = Resolve-ScriptPath $InputDir
 $FieldsConf = Resolve-ScriptPath $FieldsConf
 $OutputCsv  = Resolve-ScriptPath $OutputCsv
+$UnihanFile = Resolve-ScriptPath $UnihanFile
 $LogPath    = Join-Path $PSScriptRoot 'parse.log'
 
 # ---------------------------------------------------------------------------
@@ -52,6 +54,31 @@ if (-not (Test-Path $libPath)) {
     exit 1
 }
 . $libPath
+
+# ---------------------------------------------------------------------------
+# Load Unihan Four-Corner lookup table
+# ---------------------------------------------------------------------------
+$script:UnihanFourCorner = @{}
+if (-not (Test-Path $UnihanFile)) {
+    Write-Host "[WARN]  : 找不到 Unihan 資料檔，作者首字四角號碼欄位將全部輸出查無結果：$UnihanFile"
+} else {
+    $unihanCount = 0
+    foreach ($uLine in [System.IO.File]::ReadLines($UnihanFile, [System.Text.Encoding]::UTF8)) {
+        # Match lines like: U+5150	kFourCornerCode	2401.0
+        if ($uLine -match '^U\+([0-9A-Fa-f]+)\s+kFourCornerCode\s+(\S+)') {
+            $cp = [Convert]::ToInt32($Matches[1], 16)
+            # Only BMP characters (U+0000–U+FFFF) fit in a single [char]
+            if ($cp -le 0xFFFF) {
+                $ch = [char]$cp
+                # Take only the first space-delimited code value
+                $code = ($Matches[2] -split '\s+')[0]
+                $script:UnihanFourCorner[$ch.ToString()] = $code
+                $unihanCount++
+            }
+        }
+    }
+    Write-Host "[INFO]  : Unihan 四角號碼表載入完成，共 $unihanCount 筆"
+}
 
 # ---------------------------------------------------------------------------
 # Validate inputs

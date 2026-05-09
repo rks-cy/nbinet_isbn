@@ -287,6 +287,29 @@ function Invoke-MarcTransform {
                     $Value = '其他'
                 }
             }
+            'FOUR_CORNER' {
+                if (-not [string]::IsNullOrEmpty($Value)) {
+                    $firstChar = $Value[0]
+                    # Non-CJK characters (below the CJK Radicals Supplement block U+2E80):
+                    # foreign-author names are valid — output empty string, no warning.
+                    if ([int]$firstChar -lt 0x2E80) {
+                        $Value = ''
+                    } else {
+                        $lookup = $null
+                        if ($Script:UnihanFourCorner -ne $null) {
+                            $lookup = $Script:UnihanFourCorner[$firstChar.ToString()]
+                        }
+                        if ($lookup) {
+                            $Value = $lookup
+                        } else {
+                            if ($WarnList -ne $null) {
+                                [void]$WarnList.Value.Add("FOUR_CORNER: 找不到「$firstChar」的四角號碼")
+                            }
+                            $Value = "(查無四角號碼:$firstChar)"
+                        }
+                    }
+                }
+            }
         }
     }
     return $Value

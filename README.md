@@ -42,6 +42,9 @@
 | `marc_output.csv` | Phase 2 輸出：書目表格 |
 | `scrape.log` / `parse.log` | 執行日誌 |
 | `launch.cmd` | 一鍵執行入口 |
+| `data/` | 外部參考資料目錄（詳見 `data/SOURCES.md`） |
+| `data/Unihan_DictionaryLikeData.txt` | Unicode Unihan 資料庫，供四角號碼查表使用 |
+| `data/SOURCES.md` | 資料來源與更新說明 |
 
 ---
 
@@ -61,6 +64,11 @@ TEST003,9786267255384
 ## 變更記錄
 
 ### 目前版本
+- 新增「作者首字四角號碼」欄位：取作者首字並查 Unicode Unihan 四角號碼（`kFourCornerCode`）
+- 新增 `data/` 目錄存放 `Unihan_DictionaryLikeData.txt`，並附 `data/SOURCES.md` 說明來源與更新方式
+- `parse.ps1` 新增 `-UnihanFile` 參數（預設：`.\data\Unihan_DictionaryLikeData.txt`）
+
+### 前一版本
 - `isbn.csv` 改為兩欄格式（登錄號,ISBN）；登錄號直接填入 CSV 第一欄
 - 第一階段輸出改存至 `grabbed_isbn/` 子目錄（不存在時自動建立）
 - `launch.cmd` 直接呼叫 `scrape.ps1`，移除中間層 `run.ps1`
