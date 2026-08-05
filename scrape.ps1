@@ -30,24 +30,68 @@ $resolvedOutputDir = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDi
 New-Item -ItemType Directory -Force -Path $resolvedOutputDir | Out-Null
 Write-Log -Level 'INFO' -Message "輸出目錄：$resolvedOutputDir"
 
-# Dot-source libs with correct 2-arg Join-Path (PS 5.1)
 $libDir = Join-Path $PSScriptRoot 'lib'
 . (Join-Path $libDir 'http.ps1')
 . (Join-Path $libDir 'parse.ps1')
 
-$BaseOrigin = "https://nbinet3.ncl.edu.tw"
-$OpacMenu   = "$BaseOrigin/screens/opacmenu_cht.html"
-function New-BaseHeaders { param([string]$Ref = $null); $h = @{ 'User-Agent'=$UserAgent; 'Accept-Language'=$AcceptLanguage; 'Accept'='text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' }; if ($Ref) { $h['Referer']=$Ref }; if ($ExtraHeaders) { foreach ($k in $ExtraHeaders.Keys) { $h[$k]=$ExtraHeaders[$k] } }; return $h }
+$BaseOrigin = "https://nbinet.primo.exlibrisgroup.com"
+$Vid        = "886NCL_NBINET:NBINET"
+$WarmupUrl  = "$BaseOrigin/nde/home?vid=$Vid&lang=zh-tw"
 
-function Normalize-Isbn { param([string]$Raw) if ([string]::IsNullOrWhiteSpace($Raw)) { return $null } $s = ($Raw -replace '[\s-]','').Trim().ToUpper(); if ($s -match '^\d{13}$') { return $s }; if ($s -match '^\d{9}[\dX]$') { return $s }; return $null }
+function New-JsonHeaders {
+  param([string]$Ref = $null)
+  $h = @{
+    'User-Agent'      = $UserAgent
+    'Accept-Language' = $AcceptLanguage
+    'Accept'          = 'application/json, text/plain, */*'
+  }
+  if ($Ref) { $h['Referer'] = $Ref }
+  if ($ExtraHeaders) { foreach ($k in $ExtraHeaders.Keys) { $h[$k] = $ExtraHeaders[$k] } }
+  return $h
+}
 
-$session = Initialize-WebSession -OpacMenuUrl $OpacMenu -Headers (New-BaseHeaders)
+function New-TextHeaders {
+  param([string]$Ref = $null)
+  $h = @{
+    'User-Agent'      = $UserAgent
+    'Accept-Language' = $AcceptLanguage
+    'Accept'          = 'text/plain, */*'
+  }
+  if ($Ref) { $h['Referer'] = $Ref }
+  if ($ExtraHeaders) { foreach ($k in $ExtraHeaders.Keys) { $h[$k] = $ExtraHeaders[$k] } }
+  return $h
+}
 
-# 讀檔並強制為陣列
+function Normalize-Isbn {
+  param([string]$Raw)
+  if ([string]::IsNullOrWhiteSpace($Raw)) { return $null }
+  $s = ($Raw -replace '[\s-]', '').Trim().ToUpper()
+  if ($s -match '^\d{13}$') { return $s }
+  if ($s -match '^\d{9}[\dX]$') { return $s }
+  return $null
+}
+
+function Build-PrimoSearchUrl {
+  param([string]$Isbn)
+  $q = [uri]::EscapeDataString("any,contains,$Isbn")
+  $vidEsc = [uri]::EscapeDataString($Vid)
+  return "$BaseOrigin/primaws/rest/pub/pnxs?q=$q&tab=LibraryCatalog&scope=MyInstitution&vid=$vidEsc&lang=zh-TW&offset=0&limit=10"
+}
+
+function Build-PrimoSourceRecordUrl {
+  param([string]$DocId)
+  $vidEsc = [uri]::EscapeDataString($Vid)
+  $docEsc = [uri]::EscapeDataString($DocId)
+  return "$BaseOrigin/primaws/rest/pub/sourceRecord?docId=$docEsc&vid=$vidEsc"
+}
+
+$session = Initialize-WebSession -WarmupUrl $WarmupUrl -Headers (New-JsonHeaders)
+
 $lines = Get-Content -Path $inputPath -Encoding UTF8
 $isbnList = @($lines | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 if (-not $isbnList -or $isbnList.Count -eq 0) { Write-Log -Level 'ERROR' -Message "輸入檔沒有任何 ISBN：$inputPath"; exit 1 }
 
+Write-Log -Level 'INFO' -Message "資料來源：$BaseOrigin （vid=$Vid）"
 Write-Log -Level 'INFO' -Message "總計 $($isbnList.Count) 筆 ISBN，開始處理。"
 
 $idx = 0
@@ -58,33 +102,65 @@ foreach ($raw in $isbnList) {
   Write-Log -Level 'INFO' -Message "第 $idx 筆：處理 ISBN=$isbn"
   Start-Sleep -Milliseconds (Get-Random -Minimum $MinDelayMs -Maximum ($MaxDelayMs+1))
 
-  $searchUrl = "$BaseOrigin/search*cht/?searchtype=i&searcharg=$isbn&searchscope=1"
-  $searchResp = Invoke-GetWithRetry -Url $searchUrl -WebSession $session -Headers (New-BaseHeaders -Ref $OpacMenu) -MaxRetry $MaxRetry -InitialDelaySec $InitialRetrySec -Backoff $RetryBackoff -OnRetry { param($try,$ex) Write-Log -Level 'WARN' -Message "  [重試 $try/$MaxRetry] 讀取結果頁失敗：$($ex.Message)" }
-  if (-not $searchResp) { Write-Log -Level 'ERROR' -Message "  無法取得結果頁（多次重試後失敗）：$searchUrl"; "（請求失敗，無內容）" | Out-File -FilePath (Join-Path $resolvedOutputDir "$isbn.search.error.html") -Encoding utf8; continue }
+  $searchUrl = Build-PrimoSearchUrl -Isbn $isbn
+  $searchResp = Invoke-GetWithRetry -Url $searchUrl -WebSession $session -Headers (New-JsonHeaders -Ref $WarmupUrl) -MaxRetry $MaxRetry -InitialDelaySec $InitialRetrySec -Backoff $RetryBackoff -OnRetry { param($try,$ex) Write-Log -Level 'WARN' -Message "  [重試 $try/$MaxRetry] 搜尋失敗：$($ex.Message)" }
+  if (-not $searchResp) {
+    Write-Log -Level 'ERROR' -Message "  無法取得搜尋結果（多次重試後失敗）：$searchUrl"
+    "（請求失敗，無內容）" | Out-File -FilePath (Join-Path $resolvedOutputDir "$isbn.search.error.json") -Encoding utf8
+    continue
+  }
 
-  if (Test-HasPagination -Response $searchResp) { Write-Log -Level 'INFO' -Message "  偵測到搜尋結果存在分頁（Prev/Next 或 offset/page 連結）。僅處理第一頁第一筆。" }
-  if (Test-NoResult -Response $searchResp) { $msg = "沒有查獲符合查詢條件的館藏（ISBN=$isbn）。"; Write-Log -Level 'INFO' -Message "  $msg"; if ($Interactive) { Write-Host "[無結果] $msg  按空白鍵繼續..." -ForegroundColor Yellow; while ($true) { $key = [Console]::ReadKey($true); if ($key.Key -eq 'Spacebar') { break } } }; continue }
+  $searchResp.Content | Out-File -FilePath (Join-Path $resolvedOutputDir "$isbn.json") -Encoding utf8
 
-  $detailUrl = Get-FirstResultLink -Response $searchResp -BaseOrigin $BaseOrigin
-  if (-not $detailUrl) { Write-Log -Level 'WARN' -Message "  找不到第一筆 .briefcitTitle a 連結，視為無結果。"; continue } else { Write-Log -Level 'INFO' -Message "  細項頁 URL：$detailUrl" }
+  if (Test-PrimoNoResult -Response $searchResp) {
+    $msg = "沒有查獲符合查詢條件的館藏（ISBN=$isbn）。"
+    Write-Log -Level 'INFO' -Message "  $msg"
+    if ($Interactive) {
+      Write-Host "[無結果] $msg  按空白鍵繼續..." -ForegroundColor Yellow
+      while ($true) { $key = [Console]::ReadKey($true); if ($key.Key -eq 'Spacebar') { break } }
+    }
+    continue
+  }
 
-  $detailResp = Invoke-GetWithRetry -Url $detailUrl -WebSession $session -Headers (New-BaseHeaders -Ref $searchUrl) -MaxRetry $MaxRetry -InitialDelaySec $InitialRetrySec -Backoff $RetryBackoff -OnRetry { param($try,$ex) Write-Log -Level 'WARN' -Message "  [重試 $try/$MaxRetry] 讀取細項頁失敗：$($ex.Message)" }
-  if (-not $detailResp) { Write-Log -Level 'ERROR' -Message "  無法取得細項頁（多次重試後失敗）：$detailUrl"; "（請求失敗，無內容）" | Out-File -FilePath (Join-Path $resolvedOutputDir "$isbn.detail.error.html") -Encoding utf8; continue }
+  $total = Get-PrimoSearchTotal -Response $searchResp
+  if ($total -gt 1) {
+    Write-Log -Level 'INFO' -Message "  搜尋命中 $total 筆，僅取第一筆。"
+  }
 
-  $marcUrl = Get-MarcLink -Response $detailResp -DetailUrl $detailUrl -BaseOrigin $BaseOrigin
-  if (-not $marcUrl) { Write-Log -Level 'WARN' -Message "  細項頁未找到「MARC 顯示」連結，跳過該 ISBN。"; continue } else { Write-Log -Level 'INFO' -Message "  MARC 頁 URL：$marcUrl" }
+  $docId = Get-FirstPrimoRecordId -Response $searchResp
+  if (-not $docId) {
+    Write-Log -Level 'WARN' -Message "  搜尋結果無法解析 recordid，跳過。"
+    continue
+  }
 
-  $marcResp = Invoke-GetWithRetry -Url $marcUrl -WebSession $session -Headers (New-BaseHeaders -Ref $detailUrl) -MaxRetry $MaxRetry -InitialDelaySec $InitialRetrySec -Backoff $RetryBackoff -OnRetry { param($try,$ex) Write-Log -Level 'WARN' -Message "  [重試 $try/$MaxRetry] 讀取 MARC 頁失敗：$($ex.Message)" }
-  if (-not $marcResp) { Write-Log -Level 'ERROR' -Message "  無法取得 MARC 頁（多次重試後失敗）：$marcUrl"; "（請求失敗，無內容）" | Out-File -FilePath (Join-Path $resolvedOutputDir "$isbn.marc.error.html") -Encoding utf8; continue }
+  $title = Get-FirstPrimoTitle -Response $searchResp
+  if ($title) {
+    Write-Log -Level 'INFO' -Message "  第一筆：$docId — $title"
+  } else {
+    Write-Log -Level 'INFO' -Message "  第一筆：$docId"
+  }
 
-  $preText = Get-PreText -Response $marcResp
-  if (-not $preText) { Write-Log -Level 'WARN' -Message "  MARC 頁未找到 <pre>，跳過。已輸出原始 HTML 供除錯。"; $marcResp.Content | Out-File -FilePath (Join-Path $resolvedOutputDir "$isbn.marc.nopre.html") -Encoding utf8; continue }
+  $marcUrl = Build-PrimoSourceRecordUrl -DocId $docId
+  Write-Log -Level 'INFO' -Message "  MARC URL：$marcUrl"
 
-  $norm = ($preText -replace "`r`n|`n|`r", "`r`n").TrimEnd()
+  $marcResp = Invoke-GetWithRetry -Url $marcUrl -WebSession $session -Headers (New-TextHeaders -Ref $searchUrl) -MaxRetry $MaxRetry -InitialDelaySec $InitialRetrySec -Backoff $RetryBackoff -OnRetry { param($try,$ex) Write-Log -Level 'WARN' -Message "  [重試 $try/$MaxRetry] 讀取 MARC 失敗：$($ex.Message)" }
+  if (-not $marcResp) {
+    Write-Log -Level 'ERROR' -Message "  無法取得 MARC（多次重試後失敗）：$marcUrl"
+    "（請求失敗，無內容）" | Out-File -FilePath (Join-Path $resolvedOutputDir "$isbn.marc.error.txt") -Encoding utf8
+    continue
+  }
+
+  $marcText = $marcResp.Content
+  if ([string]::IsNullOrWhiteSpace($marcText) -or ($marcText -notmatch '(?i)^leader\t')) {
+    Write-Log -Level 'WARN' -Message "  MARC 內容空白或非預期格式，跳過。已輸出原始內容供除錯。"
+    $marcText | Out-File -FilePath (Join-Path $resolvedOutputDir "$isbn.marc.bad.txt") -Encoding utf8
+    continue
+  }
+
+  $norm = ($marcText -replace "`r`n|`n|`r", "`r`n").TrimEnd()
   $norm | Out-File -FilePath (Join-Path $resolvedOutputDir "$isbn.txt") -Encoding utf8
-  $marcResp.Content | Out-File -FilePath (Join-Path $resolvedOutputDir "$isbn.html") -Encoding utf8
 
-  Write-Log -Level 'INFO' -Message "  完成：$isbn  →  $isbn.txt, $isbn.html"
+  Write-Log -Level 'INFO' -Message "  完成：$isbn  →  $isbn.txt, $isbn.json"
 }
 
 Write-Log -Level 'INFO' -Message "全部處理完成。"

@@ -21,7 +21,8 @@ function Invoke-HtmlDecode {
 }
 
 # ---------------------------------------------------------------------------
-# Phase 1b: Parse MARC plain-text into a structured list
+# Phase 1b: Parse Primo sourceRecord MARC plain-text into a structured list
+# Format: TAG\tCONTENT  (leader\t…; data fields start with two indicator chars then $a…)
 # Returns [System.Collections.ArrayList] of hashtables:
 #   @{ Tag='245'; Ind1='1'; Ind2='0'; Subfields=@{a='…'; c='…'; …} }
 # Control fields (001-009): stored as Subfields @{a='value'}
@@ -30,55 +31,41 @@ function ConvertFrom-MarcText {
     param([Parameter(Mandatory=$true)][string]$RawText)
 
     $records = [System.Collections.ArrayList]::new()
-    $currentRec = $null
 
     foreach ($line in ($RawText -split "`r?`n")) {
-        # Skip blank lines
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
 
-        # Continuation line: starts with whitespace (no TAG at position 0-2)
-        if ($line -match '^[ \t]') {
-            if ($currentRec -ne $null) {
-                $trimmed = $line.TrimStart(' ', "`t")
-                $currentRec.RawContent += $trimmed
-            }
+        # leader\t...
+        if ($line -match '(?i)^leader\t(.*)$') {
+            $rec = @{ Tag='LEADER'; Ind1=' '; Ind2=' '; RawContent=$Matches[1]; Subfields=@{} }
+            [void]$records.Add($rec)
             continue
         }
 
-        # LEADER line
-        if ($line -match '^LEADER') {
-            $currentRec = @{ Tag='LEADER'; Ind1=' '; Ind2=' '; RawContent=($line -replace '^LEADER\s*',''); Subfields=@{} }
-            [void]$records.Add($currentRec)
-            continue
-        }
-
-        # TAG line: TAG = first 3 chars
-        if ($line.Length -lt 3) { continue }
-        $tag = $line.Substring(0,3).Trim()
-        if ($tag -notmatch '^\d{3}$') { continue }
-
+        # TAG\tCONTENT
+        if ($line -notmatch '^(\d{3})\t(.*)$') { continue }
+        $tag = $Matches[1]
+        $rest = $Matches[2]
         $tagNum = [int]$tag
 
         if ($tagNum -ge 1 -and $tagNum -le 9) {
-            # Control field: no indicators, rest of line (from col 3, trimmed) is value
-            $value = $line.Substring(3).Trim()
-            $currentRec = @{ Tag=$tag; Ind1=' '; Ind2=' '; RawContent=$value; Subfields=@{ a=$value } }
-            [void]$records.Add($currentRec)
+            $value = $rest.Trim()
+            $rec = @{ Tag=$tag; Ind1=' '; Ind2=' '; RawContent=$value; Subfields=@{ a=$value } }
+            [void]$records.Add($rec)
         } else {
-            # Data field layout: TAG(0-2) SPACE(3) IND1(4) IND2(5) SPACE(6) CONTENT(7+)
-            $ind1    = if ($line.Length -gt 4) { $line[4].ToString() } else { ' ' }
-            $ind2    = if ($line.Length -gt 5) { $line[5].ToString() } else { ' ' }
-            $content = if ($line.Length -gt 7) { $line.Substring(7) } else { '' }
-            $currentRec = @{ Tag=$tag; Ind1=$ind1; Ind2=$ind2; RawContent=$content; Subfields=@{} }
-            [void]$records.Add($currentRec)
+            # Indicators: first two characters of content (e.g. ##, 10, 1#)
+            $ind1 = if ($rest.Length -gt 0) { $rest[0].ToString() } else { ' ' }
+            $ind2 = if ($rest.Length -gt 1) { $rest[1].ToString() } else { ' ' }
+            $content = if ($rest.Length -gt 2) { $rest.Substring(2) } else { '' }
+            $rec = @{ Tag=$tag; Ind1=$ind1; Ind2=$ind2; RawContent=$content; Subfields=@{} }
+            [void]$records.Add($rec)
         }
     }
 
-    # Second pass: parse subfields from RawContent for all data fields
     foreach ($rec in $records) {
         if ($rec.Tag -eq 'LEADER') { continue }
         $tagNum = [int]$rec.Tag
-        if ($tagNum -ge 1 -and $tagNum -le 9) { continue }  # already set
+        if ($tagNum -ge 1 -and $tagNum -le 9) { continue }
 
         $content = Invoke-HtmlDecode -s $rec.RawContent
         $rec.Subfields = Parse-Subfields -Content $content
@@ -92,9 +79,9 @@ function Parse-Subfields {
     $sf = @{}
     if ([string]::IsNullOrEmpty($Content)) { return $sf }
 
-    # Split on |x where x is a letter
-    $parts = [regex]::Split($Content, '\|([a-zA-Z0-9])')
-    # parts[0] = implicit $a, then pairs: parts[1]=code parts[2]=value, parts[3]=code parts[4]=value ...
+    # Primo sourceRecord uses $x subfield delimiters
+    $parts = [regex]::Split($Content, '\$([a-zA-Z0-9])')
+    # parts[0] = text before first $code (usually empty); then pairs code/value
     $implicit = $parts[0].Trim()
     if (-not [string]::IsNullOrEmpty($implicit)) {
         $sf['a'] = $implicit
@@ -106,7 +93,6 @@ function Parse-Subfields {
         if (-not $sf.ContainsKey($code)) {
             $sf[$code] = $value
         } else {
-            # Append subsequent occurrences with space separator
             $sf[$code] += ' ' + $value
         }
         $i += 2

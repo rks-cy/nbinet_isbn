@@ -15,12 +15,12 @@ function Invoke-WebRequestCompat {
 
 function Initialize-WebSession {
   param(
-    [Parameter(Mandatory=$true)] [string]$OpacMenuUrl,
+    [Parameter(Mandatory=$true)] [string]$WarmupUrl,
     [Parameter(Mandatory=$true)] [hashtable]$Headers
   )
   $sess = New-Object Microsoft.PowerShell.Commands.WebRequestSession
   try {
-    Invoke-WebRequestCompat -Uri $OpacMenuUrl -WebSession $sess -Headers $Headers | Out-Null
+    Invoke-WebRequestCompat -Uri $WarmupUrl -WebSession $sess -Headers $Headers | Out-Null
   } catch {
     if (Get-Command -Name Write-Log -ErrorAction SilentlyContinue) {
       Write-Log -Level 'WARN' -Message "初始化 Session 時發生例外：$($_.Exception.Message)"
@@ -58,7 +58,7 @@ function Invoke-GetWithRetry {
     } catch {
       $attempt++
       if ($attempt -ge $MaxRetry) { break }
-      if ($OnRetry) { & $OnRetry $attempt $_.Exception } 
+      if ($OnRetry) { & $OnRetry $attempt $_.Exception }
       elseif (Get-Command -Name Write-Log -ErrorAction SilentlyContinue) {
         Write-Log -Level 'WARN' -Message "  [重試 $attempt/$MaxRetry] ${Url} → $($_.Exception.Message)"
       } else {
@@ -69,18 +69,4 @@ function Invoke-GetWithRetry {
     }
   }
   return $null
-}
-
-function Build-AbsoluteUrl {
-  param(
-    [Parameter(Mandatory=$true)] [string]$BaseOrigin,
-    [Parameter(Mandatory=$true)] [string]$Href
-  )
-  if ([string]::IsNullOrWhiteSpace($Href)) { return $null }
-  try { $Href = [System.Web.HttpUtility]::HtmlDecode($Href) } catch { try { $Href = [System.Net.WebUtility]::HtmlDecode($Href) } catch { } }
-  if ($Href -like 'about:*') { $Href = $Href.Substring(6) }
-  if ($Href.StartsWith('http://') -or $Href.StartsWith('https://')) { return $Href }
-  if ($Href.StartsWith('/')) { return "$BaseOrigin$Href" }
-  if (-not $BaseOrigin.EndsWith('/')) { $BaseOrigin = $BaseOrigin + '/' }
-  return "$BaseOrigin$Href"
 }

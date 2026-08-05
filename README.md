@@ -2,7 +2,7 @@
 
 ## 目的
 
-批次查詢 NBINet 圖書館書目系統，把每本書的書目資料整理成一份 Excel 可直接開啟的 CSV 表格。
+批次查詢 NBINet 圖書館書目系統（Primo VE），把每本書的書目資料整理成一份 Excel 可直接開啟的 CSV 表格。
 
 ---
 
@@ -14,18 +14,28 @@
 
 ---
 
+## 資料來源
+
+- 站台：https://nbinet.primo.exlibrisgroup.com
+- View ID：`886NCL_NBINET:NBINET`
+- 搜尋 API：`/primaws/rest/pub/pnxs`（參數使用 `scope=`，不是 `search_scope=`）
+- 機讀格式 API：`/primaws/rest/pub/sourceRecord?docId=alma…&vid=…`
+- 同一 ISBN 若命中多筆，**只取搜尋結果第一筆**
+
+---
+
 ## 兩階段流程
 
 ### 第一階段：下載書目（scrape.ps1）
 
 1. 讀取 `isbn.csv` 的 ISBN 清單
-2. 逐一到 NBINet 搜尋 → 進入書目細項頁 → 點「MARC 顯示」
-3. 把 MARC 純文字存成 `grabbed_isbn/{ISBN}.txt`，原始 HTML 存成 `grabbed_isbn/{ISBN}.html`
+2. 逐一呼叫 Primo 搜尋 API → 取第一筆 `recordid` → 下載 `sourceRecord` MARC 純文字
+3. 把 MARC 純文字存成 `grabbed_isbn/{ISBN}.txt`，搜尋 JSON 存成 `grabbed_isbn/{ISBN}.json`
 4. 每本間隔 0.5～0.9 秒；失敗自動重試 3 次；錯誤記入 `scrape.log`
 
 ### 第二階段：解析輸出（parse.ps1）
 
-1. 讀取每本的 `grabbed_isbn/{ISBN}.txt`
+1. 讀取每本的 `grabbed_isbn/{ISBN}.txt`（Primo `leader\t` / `$a` 分欄格式）
 2. 依 `fields.conf` 的欄位定義，解析書名、作者、出版資訊、主題等
 3. 自動辨識 MARC21 或 UNIMARC 格式
 4. 匯出 `marc_output.csv`（UTF-8 BOM，可直接用 Excel 開啟）；錯誤記入 `parse.log`
@@ -38,7 +48,7 @@
 |---|---|
 | `isbn.csv` | 輸入：每行 `登錄號,ISBN` |
 | `fields.conf` | 設定：CSV 欄位映射規則 |
-| `grabbed_isbn/` | Phase 1 輸出：`.txt` 與 `.html` |
+| `grabbed_isbn/` | Phase 1 輸出：`.txt`（MARC）與 `.json`（搜尋結果） |
 | `marc_output.csv` | Phase 2 輸出：書目表格 |
 | `scrape.log` / `parse.log` | 執行日誌 |
 | `launch.cmd` | 一鍵執行入口 |
@@ -64,15 +74,14 @@ TEST003,9786267255384
 ## 變更記錄
 
 ### 目前版本
+- 資料來源改為 NBINet Primo VE（`nbinet.primo.exlibrisgroup.com`）
+- Phase 1 改呼叫 `pnxs` + `sourceRecord` REST API；輸出 `.txt` + `.json`
+- Phase 2 MARC 解析改為只支援 Primo 機讀格式（`leader\t`、tab 分隔、`$` 分欄）
+
+### 前一版本
 - 新增「作者首字四角號碼」欄位：取作者首字並查 Unicode Unihan 四角號碼（`kFourCornerCode`）
 - 新增 `data/` 目錄存放 `Unihan_DictionaryLikeData.txt`，並附 `data/SOURCES.md` 說明來源與更新方式
 - `parse.ps1` 新增 `-UnihanFile` 參數（預設：`.\data\Unihan_DictionaryLikeData.txt`）
-
-### 前一版本
 - `isbn.csv` 改為兩欄格式（登錄號,ISBN）；登錄號直接填入 CSV 第一欄
 - 第一階段輸出改存至 `grabbed_isbn/` 子目錄（不存在時自動建立）
 - `launch.cmd` 直接呼叫 `scrape.ps1`，移除中間層 `run.ps1`
-
-### v3.4-fix3
-- 修正 PS 5.1 `Join-Path` 只接受兩個位置參數的限制（改為先組 `$libDir`，再 `Join-Path $libDir 'http.ps1'`）
-- 保留 v3.4-fix2 的 `Invoke-WebRequestCompat` 與強制陣列化的 ISBN 清單、log 分流等
