@@ -79,9 +79,11 @@ function Parse-Subfields {
     $sf = @{}
     if ([string]::IsNullOrEmpty($Content)) { return $sf }
 
-    # Primo sourceRecord uses $x subfield delimiters
-    $parts = [regex]::Split($Content, '\$([a-zA-Z0-9])')
-    # parts[0] = text before first $code (usually empty); then pairs code/value
+    # Split only on lowercase-letter subfield codes ($a–$z).
+    # Digit codes ($0–$9) are control/linkage subfields and must NOT be treated
+    # as delimiters here; otherwise currency strings like "NT$200" would be
+    # split at "$2", truncating the price to just "NT".
+    $parts = [regex]::Split($Content, '\$([a-z])')
     $implicit = $parts[0].Trim()
     if (-not [string]::IsNullOrEmpty($implicit)) {
         $sf['a'] = $implicit
@@ -97,6 +99,15 @@ function Parse-Subfields {
         }
         $i += 2
     }
+
+    # Remove any trailing digit-subfield residue left in values, e.g.
+    # "8745.13 $2ncsclt" → "8745.13".  A digit subfield that was not split
+    # above appears as " $<digit><text>" (always preceded by whitespace).
+    $cleanKeys = @($sf.Keys)
+    foreach ($key in $cleanKeys) {
+        $sf[$key] = ($sf[$key] -replace '\s+\$\d\S*', '').Trim()
+    }
+
     return $sf
 }
 

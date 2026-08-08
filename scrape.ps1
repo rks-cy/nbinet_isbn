@@ -9,6 +9,7 @@
   [int]$MaxRetry = 3,
   [double]$InitialRetrySec = 3.0,
   [double]$RetryBackoff = 1.5,
+  [int]$TimeoutSec = 30,
   [switch]$AppendLog = $false,
   [switch]$Interactive = $false
 )
@@ -85,13 +86,14 @@ function Build-PrimoSourceRecordUrl {
   return "$BaseOrigin/primaws/rest/pub/sourceRecord?docId=$docEsc&vid=$vidEsc"
 }
 
-$session = Initialize-WebSession -WarmupUrl $WarmupUrl -Headers (New-JsonHeaders)
+$session = Initialize-WebSession -WarmupUrl $WarmupUrl -Headers (New-JsonHeaders) -TimeoutSec $TimeoutSec
 
 $lines = Get-Content -Path $inputPath -Encoding UTF8
 $isbnList = @($lines | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 if (-not $isbnList -or $isbnList.Count -eq 0) { Write-Log -Level 'ERROR' -Message "輸入檔沒有任何 ISBN：$inputPath"; exit 1 }
 
 Write-Log -Level 'INFO' -Message "資料來源：$BaseOrigin （vid=$Vid）"
+Write-Log -Level 'INFO' -Message "逾時設定：每次請求最多等待 $TimeoutSec 秒，失敗後最多重試 $MaxRetry 次"
 Write-Log -Level 'INFO' -Message "總計 $($isbnList.Count) 筆 ISBN，開始處理。"
 
 $idx = 0
@@ -103,7 +105,8 @@ foreach ($raw in $isbnList) {
   Start-Sleep -Milliseconds (Get-Random -Minimum $MinDelayMs -Maximum ($MaxDelayMs+1))
 
   $searchUrl = Build-PrimoSearchUrl -Isbn $isbn
-  $searchResp = Invoke-GetWithRetry -Url $searchUrl -WebSession $session -Headers (New-JsonHeaders -Ref $WarmupUrl) -MaxRetry $MaxRetry -InitialDelaySec $InitialRetrySec -Backoff $RetryBackoff -OnRetry { param($try,$ex) Write-Log -Level 'WARN' -Message "  [重試 $try/$MaxRetry] 搜尋失敗：$($ex.Message)" }
+  $searchResp = Invoke-GetWithRetry -Url $searchUrl -WebSession $session -Headers (New-JsonHeaders -Ref $WarmupUrl) `
+    -MaxRetry $MaxRetry -InitialDelaySec $InitialRetrySec -Backoff $RetryBackoff -TimeoutSec $TimeoutSec
   if (-not $searchResp) {
     Write-Log -Level 'ERROR' -Message "  無法取得搜尋結果（多次重試後失敗）：$searchUrl"
     "（請求失敗，無內容）" | Out-File -FilePath (Join-Path $resolvedOutputDir "$isbn.search.error.json") -Encoding utf8
@@ -143,7 +146,8 @@ foreach ($raw in $isbnList) {
   $marcUrl = Build-PrimoSourceRecordUrl -DocId $docId
   Write-Log -Level 'INFO' -Message "  MARC URL：$marcUrl"
 
-  $marcResp = Invoke-GetWithRetry -Url $marcUrl -WebSession $session -Headers (New-TextHeaders -Ref $searchUrl) -MaxRetry $MaxRetry -InitialDelaySec $InitialRetrySec -Backoff $RetryBackoff -OnRetry { param($try,$ex) Write-Log -Level 'WARN' -Message "  [重試 $try/$MaxRetry] 讀取 MARC 失敗：$($ex.Message)" }
+  $marcResp = Invoke-GetWithRetry -Url $marcUrl -WebSession $session -Headers (New-TextHeaders -Ref $searchUrl) `
+    -MaxRetry $MaxRetry -InitialDelaySec $InitialRetrySec -Backoff $RetryBackoff -TimeoutSec $TimeoutSec
   if (-not $marcResp) {
     Write-Log -Level 'ERROR' -Message "  無法取得 MARC（多次重試後失敗）：$marcUrl"
     "（請求失敗，無內容）" | Out-File -FilePath (Join-Path $resolvedOutputDir "$isbn.marc.error.txt") -Encoding utf8
