@@ -159,6 +159,8 @@ function ConvertFrom-FieldsConf {
                 $currentDef.Join = $Matches[1]  # preserve as-is (may be ；)
             } elseif ($optLine -match '^SUBFIELD_JOIN=(.*)$') {
                 $currentDef.SubfieldJoin = $Matches[1]  # preserve trailing space/empty
+            } elseif ($optLine -match '^SOURCES_JOIN=(.*)$') {
+                $currentDef.SourcesJoin = $Matches[1]  # separator used between values from different sources
             } elseif ($optLine -match '^TRANSFORM=(.+)$') {
                 $currentDef.Transforms = ($Matches[1].Trim() -split ',') | ForEach-Object { $_.Trim() }
             }
@@ -176,6 +178,7 @@ function ConvertFrom-FieldsConf {
                 Take         = 'first'
                 Join         = '；'
                 SubfieldJoin = ''
+                SourcesJoin  = $null   # non-null = merge values from ALL sources with this separator
                 Transforms   = @()
             }
             [void]$fieldDefs.Add($currentDef)
@@ -357,6 +360,37 @@ function Get-FieldValue {
 
     $doStripPunct = ($FieldDef.Transforms -contains 'STRIP_PUNCT')
     $sjoin = $FieldDef.SubfieldJoin  # subfield join char (may be '' or ' ')
+
+    # ---- SOURCES_JOIN mode -----------------------------------------------
+    # When SourcesJoin is set, collect the first non-empty value from EACH
+    # source independently and join the collected pieces with SourcesJoin.
+    # This is how "全書名 = 書名 + ' ' + 並列題名" is expressed in one field.
+    # (Normal TAKE=first/all falls back to the next source only when the
+    #  current source is empty; SOURCES_JOIN always tries every source.)
+    # ----------------------------------------------------------------------
+    if ($FieldDef.SourcesJoin -ne $null) {
+        $collected = [System.Collections.ArrayList]::new()
+        foreach ($src in $FieldDef.Sources) {
+            if ($src.IsControl008) { continue }
+            $matchingRecs = @($Records | Where-Object { $_.Tag -eq $src.Tag })
+            if ($matchingRecs.Count -eq 0) { continue }
+            $rowVal = Get-SubfieldValue -Rec $matchingRecs[0] -Subfields $src.Subfields `
+                -SubfieldJoin $sjoin -DoStripPunct $doStripPunct
+            if (-not [string]::IsNullOrEmpty($rowVal)) {
+                $otherRules = $FieldDef.Transforms | Where-Object { $_ -ne 'STRIP_PUNCT' }
+                $rowVal = Invoke-MarcTransform -Value $rowVal -Rules $otherRules -WarnList $WarnList.Value
+                if (-not [string]::IsNullOrEmpty($rowVal)) {
+                    [void]$collected.Add($rowVal)
+                }
+            }
+        }
+        if ($collected.Count -gt 0) {
+            $combined = $collected -join $FieldDef.SourcesJoin
+            if ($doStripPunct) { $combined = Invoke-StripPunct -Value $combined }
+            return $combined
+        }
+        return ''
+    }
 
     foreach ($src in $FieldDef.Sources) {
         $result = ''
